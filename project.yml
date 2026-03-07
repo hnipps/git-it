@@ -1,0 +1,52 @@
+name: LogseqGit
+options:
+  bundleIdPrefix: com.logseqgit
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+
+packages:
+  SwiftGit2:
+    url: https://github.com/SwiftGit2/SwiftGit2.git
+    from: "0.0.1"
+
+targets:
+  LogseqGit:
+    type: application
+    platform: iOS
+    sources:
+      - path: LogseqGit
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.logseqgit.app
+        INFOPLIST_FILE: LogseqGit/Info.plist
+        CODE_SIGN_ENTITLEMENTS: LogseqGit/LogseqGit.entitlements
+    dependencies:
+      - package: SwiftGit2
+      - target: FileProviderExtension
+    info:
+      path: LogseqGit/Info.plist
+    entitlements:
+      path: LogseqGit/LogseqGit.entitlements
+
+  FileProviderExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: FileProviderExtension
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.logseqgit.app.FileProvider
+        INFOPLIST_FILE: FileProviderExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: FileProviderExtension/FileProviderExtension.entitlements
+    info:
+      path: FileProviderExtension/Info.plist
+    entitlements:
+      path: FileProviderExtension/FileProviderExtension.entitlements
