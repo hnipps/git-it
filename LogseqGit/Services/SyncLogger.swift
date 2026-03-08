@@ -29,6 +29,11 @@ class SyncLogger {
         logURL = Constants.syncLogPath
     }
 
+    /// Testable initializer that accepts an arbitrary log file URL.
+    init(logURL: URL) {
+        self.logURL = logURL
+    }
+
     /// Append a log entry to the JSON array file, trimming to `maxEntries`.
     func log(_ entry: SyncLogEntry) {
         queue.sync {

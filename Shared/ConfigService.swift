@@ -26,6 +26,20 @@ final class ConfigService {
         self.decoder = dec
     }
 
+    /// Testable initializer that accepts an arbitrary file URL.
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        self.encoder = enc
+
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        self.decoder = dec
+    }
+
     // MARK: - Public API
 
     /// Loads the persisted configuration, returning `nil` if no config file exists

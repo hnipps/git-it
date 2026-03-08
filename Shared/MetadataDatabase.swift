@@ -13,6 +13,7 @@ final class MetadataDatabase {
 
     private var db: OpaquePointer?
     private var cachedAnchor: Int64?
+    private let databasePath: String
 
     // MARK: - Singleton
 
@@ -21,6 +22,14 @@ final class MetadataDatabase {
     // MARK: - Lifecycle
 
     private init() {
+        self.databasePath = Constants.databasePath.path
+        openDatabase()
+        createTablesIfNeeded()
+    }
+
+    /// Testable initializer that accepts an arbitrary database file path.
+    init(databasePath: String) {
+        self.databasePath = databasePath
         openDatabase()
         createTablesIfNeeded()
     }
@@ -34,7 +43,7 @@ final class MetadataDatabase {
     // MARK: - Database Setup
 
     private func openDatabase() {
-        let path = Constants.databasePath.path
+        let path = self.databasePath
         let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
         let result = sqlite3_open_v2(path, &db, flags, nil)
         guard result == SQLITE_OK else {

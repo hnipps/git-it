@@ -139,12 +139,16 @@ final class GitService: ObservableObject {
                     try FileManager.default.removeItem(at: repoPath)
                 }
 
+                guard let remoteURLObj = URL(string: remoteURL) else {
+                    throw GitError.cloneFailed("Invalid remote URL")
+                }
+
                 let result = Repository.clone(
-                    from: remoteURL,
+                    from: remoteURLObj,
                     to: repoPath,
                     localClone: false,
                     bare: false,
-                    credentials: self.credentialCallback(),
+                    credentials: self.swiftGit2Credentials(),
                     checkoutStrategy: .Force,
                     checkoutProgress: nil
                 )
@@ -164,7 +168,7 @@ final class GitService: ObservableObject {
                         break
                     }
                 case .failure(let error):
-                    throw self.mapError(error, as: .cloneFailed)
+                    throw self.mapError(error, as: GitError.cloneFailed)
                 }
             }
             await setStatus(.idle)
@@ -178,9 +182,7 @@ final class GitService: ObservableObject {
 
     /// Fetches from origin and fast-forwards the current branch.
     ///
-    /// If fast-forward is not possible the conflict strategy is applied:
-    /// local changes are stashed, a merge with "theirs" strategy is attempted,
-    /// and if that also fails a conflict branch is created.
+    /// If fast-forward is not possible, an error is thrown indicating divergence.
     ///
     /// - Returns: A ``PullResult`` describing what happened.
     @discardableResult
@@ -192,15 +194,13 @@ final class GitService: ObservableObject {
                 let repo = try self.openRepo()
 
                 // 1. Fetch from origin.
-                let remote = repo.remote(named: "origin")
-                switch remote {
-                case .success(let origin):
-                    let fetchResult = repo.fetch(origin, credentials: self.credentialCallback())
-                    if case .failure(let error) = fetchResult {
-                        throw self.mapError(error, as: .pullFailed)
-                    }
-                case .failure(let error):
-                    throw GitError.pullFailed("Could not find remote 'origin': \(error.localizedDescription)")
+                let fetchResult = GitCredentialHelper.fetch(
+                    repo: repo,
+                    remoteName: "origin",
+                    credentials: self.credentialContext()
+                )
+                if case .failure(let error) = fetchResult {
+                    throw self.mapError(error, as: GitError.pullFailed)
                 }
 
                 // 2. Resolve the local and remote branch references.
@@ -229,31 +229,17 @@ final class GitService: ObservableObject {
                     return .upToDate
                 }
 
-                // 3. Attempt fast-forward.
-                let analysis = repo.analyzeMerge(from: remoteBranch)
-                switch analysis {
-                case .success(let kind) where kind.contains(.fastForward):
-                    let setRef = repo.setHEAD(repo.HEAD().map { _ in remoteBranch })
-                    if case .failure(let error) = setRef {
-                        throw GitError.pullFailed("Fast-forward failed: \(error.localizedDescription)")
-                    }
-                    let checkoutResult = repo.checkout(remoteBranch, strategy: .Force)
-                    if case .failure(let error) = checkoutResult {
-                        throw GitError.pullFailed("Checkout after fast-forward failed: \(error.localizedDescription)")
-                    }
-                    let diffCount = try self.diffFileCount(repo: repo, from: localCommit.oid, to: remoteCommit.oid)
-                    return .pulled(fileCount: diffCount)
-
-                case .success(let kind) where kind.contains(.upToDate):
-                    return .upToDate
-
-                case .success:
-                    // Not fast-forwardable — apply conflict strategy.
-                    return try self.handleConflict(repo: repo, localBranch: localBranch, remoteBranch: remoteBranch, branchName: branchName)
-
-                case .failure(let error):
-                    throw GitError.pullFailed("Merge analysis failed: \(error.localizedDescription)")
+                // 3. Attempt fast-forward: set HEAD to remote branch and checkout.
+                let setRef = repo.setHEAD(remoteBranch)
+                if case .failure(let error) = setRef {
+                    throw GitError.pullFailed("Cannot fast-forward — branches may have diverged: \(error.localizedDescription)")
                 }
+                let checkoutResult = repo.checkout(remoteBranch, strategy: .Force)
+                if case .failure(let error) = checkoutResult {
+                    throw GitError.pullFailed("Checkout failed: \(error.localizedDescription)")
+                }
+                let diffCount = try self.diffFileCount(repo: repo, from: localCommit.oid, to: remoteCommit.oid)
+                return .pulled(fileCount: diffCount)
             }
 
             // Update config with pull timestamp.
@@ -294,7 +280,7 @@ final class GitService: ObservableObject {
                 }
 
                 // Stage everything (git add -A).
-                let addResult = repo.add()
+                let addResult = repo.add(path: ".")
                 if case .failure(let error) = addResult {
                     throw GitError.commitFailed("Staging failed: \(error.localizedDescription)")
                 }
@@ -336,22 +322,19 @@ final class GitService: ObservableObject {
                     throw GitError.pushFailed("No configuration available.")
                 }
 
-                guard case .success(let remote) = repo.remote(named: "origin") else {
-                    throw GitError.pushFailed("Remote 'origin' not found.")
-                }
-
                 guard case .success(let localBranch) = repo.localBranch(named: config.branch) else {
                     throw GitError.pushFailed("Local branch '\(config.branch)' not found.")
                 }
 
-                let pushResult = repo.push(
-                    remote: remote,
-                    branch: localBranch,
-                    credentials: self.credentialCallback()
+                let pushResult = GitCredentialHelper.push(
+                    repo: repo,
+                    remoteName: "origin",
+                    refspec: localBranch.longName,
+                    credentials: self.credentialContext()
                 )
 
                 if case .failure(let error) = pushResult {
-                    throw self.mapError(error, as: .pushFailed)
+                    throw self.mapError(error, as: GitError.pushFailed)
                 }
             }
 
@@ -408,30 +391,26 @@ final class GitService: ObservableObject {
             switch statusResult {
             case .success(let entries):
                 return entries.compactMap { entry -> StatusEntry? in
-                    let path = entry.headToIndex?.oldFile?.path
-                        ?? entry.indexToWorkDir?.oldFile?.path
-                        ?? entry.headToIndex?.newFile?.path
-                        ?? entry.indexToWorkDir?.newFile?.path
-
-                    guard let filePath = path else { return nil }
-
                     let fileStatus: FileStatus
-                    if entry.indexToWorkDir?.status == .untracked {
+                    if entry.status.contains(.workTreeNew) {
                         fileStatus = .untracked
-                    } else if entry.headToIndex?.status == .added
-                                || entry.indexToWorkDir?.status == .added {
+                    } else if entry.status.contains(.indexNew) {
                         fileStatus = .added
-                    } else if entry.headToIndex?.status == .deleted
-                                || entry.indexToWorkDir?.status == .deleted {
+                    } else if entry.status.contains(.indexDeleted) || entry.status.contains(.workTreeDeleted) {
                         fileStatus = .deleted
-                    } else if entry.headToIndex?.status == .renamed
-                                || entry.indexToWorkDir?.status == .renamed {
+                    } else if entry.status.contains(.indexRenamed) || entry.status.contains(.workTreeRenamed) {
                         fileStatus = .renamed
                     } else {
                         fileStatus = .modified
                     }
 
-                    return StatusEntry(filePath: filePath, status: fileStatus)
+                    let filePath = entry.headToIndex?.oldFile?.path
+                        ?? entry.indexToWorkDir?.oldFile?.path
+                        ?? entry.headToIndex?.newFile?.path
+                        ?? entry.indexToWorkDir?.newFile?.path
+                    guard let path = filePath else { return nil }
+
+                    return StatusEntry(filePath: path, status: fileStatus)
                 }
             case .failure(let error):
                 throw GitError.commitFailed("Could not read status: \(error.localizedDescription)")
@@ -447,111 +426,49 @@ final class GitService: ObservableObject {
         }
     }
 
-    // MARK: - Conflict Strategy (Private)
 
-    /// Handles the case where a pull cannot be fast-forwarded.
-    ///
-    /// 1. Stash uncommitted local changes.
-    /// 2. Attempt a merge using the "theirs" strategy.
-    /// 3. On success, commit the merge and pop the stash.
-    /// 4. On failure, abort the merge, create a conflict branch, and reset to the remote HEAD.
-    private func handleConflict(
-        repo: Repository,
-        localBranch: Branch,
-        remoteBranch: Branch,
-        branchName: String
-    ) throws -> PullResult {
-        // 1. Stash local changes if any.
-        let hasChanges = try workingTreeHasChanges(repo: repo)
-        if hasChanges {
-            let stashResult = repo.stash(signature: makeSignature(), message: "Pre-pull stash")
-            if case .failure(let error) = stashResult {
-                throw GitError.pullFailed("Stash failed: \(error.localizedDescription)")
-            }
+    // MARK: - Credential Helpers (Private)
+
+    /// Returns a `GitCredentialContext` for use with `GitCredentialHelper` (fetch/push).
+    private func credentialContext() -> GitCredentialContext {
+        guard let config = configService.loadConfig() else {
+            return GitCredentialContext(auth: .none)
         }
 
-        // 2. Attempt merge with "theirs" strategy.
-        let mergeResult = repo.merge(remoteBranch, strategy: .Force)
-        switch mergeResult {
-        case .success:
-            // Commit the merge.
-            let signature = makeSignature()
-            let commitResult = repo.commit(
-                message: "Merge remote-tracking branch 'origin/\(branchName)'",
-                signature: signature
-            )
-
-            if case .failure(let error) = commitResult {
-                throw GitError.pullFailed("Merge commit failed: \(error.localizedDescription)")
+        switch config.authMethod {
+        case .ssh:
+            guard let keyData = try? keychainService.getSSHPrivateKey(),
+                  let keyString = String(data: keyData, encoding: .utf8) else {
+                return GitCredentialContext(auth: .none)
             }
+            return GitCredentialContext(auth: .ssh(privateKey: keyString))
 
-            // Pop stash if we stashed earlier.
-            if hasChanges {
-                let popResult = repo.stashPop()
-                if case .failure(let error) = popResult {
-                    throw GitError.pullFailed("Stash pop after merge failed: \(error.localizedDescription)")
-                }
+        case .https:
+            guard let token = try? keychainService.getPAT() else {
+                return GitCredentialContext(auth: .none)
             }
-
-            let diffCount = try diffFileCount(repo: repo, from: localBranch.oid, to: remoteBranch.oid)
-            return .pulled(fileCount: diffCount)
-
-        case .failure:
-            // 3. Merge failed — create conflict branch.
-            let timestamp = ISO8601DateFormatter().string(from: Date())
-                .replacingOccurrences(of: ":", with: "-")
-            let conflictBranchName = "CONFLICT-\(timestamp)"
-
-            // Abort the in-progress merge.
-            _ = repo.cleanupMerge()
-
-            // Create a branch from the current HEAD to preserve local state.
-            if case .success(let headRef) = repo.HEAD() {
-                _ = repo.createBranch(named: conflictBranchName, target: headRef.oid)
-            }
-
-            // Reset to remote HEAD.
-            if case .success(let remoteCommit) = repo.commit(remoteBranch.oid) {
-                _ = repo.reset(remoteCommit, type: .hard)
-            }
-
-            // Pop stash onto the reset state (best effort).
-            if hasChanges {
-                _ = repo.stashPop()
-            }
-
-            return .conflictBranch(name: conflictBranchName)
+            return GitCredentialContext(auth: .plaintext(username: "logseqgit", password: token))
         }
     }
 
-    // MARK: - Credential Callbacks (Private)
-
-    /// Returns a credential callback closure suitable for SwiftGit2 remote operations.
-    private func credentialCallback() -> Credentials {
+    /// Returns `Credentials` for SwiftGit2 operations that accept it directly (e.g. clone).
+    private func swiftGit2Credentials() -> Credentials {
         guard let config = configService.loadConfig() else {
             return .default
         }
 
         switch config.authMethod {
         case .ssh:
-            guard let privateKeyData = try? keychainService.getSSHPrivateKey(),
-                  let keyData = privateKeyData else {
+            guard let keyData = try? keychainService.getSSHPrivateKey(),
+                  let keyString = String(data: keyData, encoding: .utf8) else {
                 return .default
             }
-
-            return .sshMemory(
-                username: "git",
-                publicKey: "",
-                privateKey: String(data: keyData, encoding: .utf8) ?? "",
-                passphrase: ""
-            )
+            return .sshMemory(username: "git", privateKey: keyString, passphrase: "")
 
         case .https:
-            guard let pat = try? keychainService.getPAT(),
-                  let token = pat else {
+            guard let token = try? keychainService.getPAT() else {
                 return .default
             }
-
             return .plaintext(username: "logseqgit", password: token)
         }
     }
@@ -586,12 +503,15 @@ final class GitService: ObservableObject {
 
     /// Returns the number of files changed between two OIDs.
     private func diffFileCount(repo: Repository, from oldOID: OID, to newOID: OID) throws -> Int {
-        let diffResult = repo.diff(from: oldOID, to: newOID)
-        switch diffResult {
-        case .success(let diff):
-            return diff.deltaCount
+        switch repo.commit(newOID) {
+        case .success(let commit):
+            switch repo.diff(for: commit) {
+            case .success(let diff):
+                return diff.deltas.count
+            case .failure:
+                return 0
+            }
         case .failure:
-            // Non-critical — default to 0 rather than throwing.
             return 0
         }
     }

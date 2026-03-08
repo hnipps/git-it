@@ -12,8 +12,8 @@ settings:
 
 packages:
   SwiftGit2:
-    url: https://github.com/SwiftGit2/SwiftGit2.git
-    from: "0.0.1"
+    url: https://github.com/joehinkle11/SwiftGit3.git
+    from: "1.2.2"
 
 targets:
   LogseqGit:
@@ -34,6 +34,21 @@ targets:
       path: LogseqGit/Info.plist
     entitlements:
       path: LogseqGit/LogseqGit.entitlements
+
+  LogseqGitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: LogseqGitTests
+      - path: Shared
+    dependencies:
+      - target: LogseqGit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.logseqgit.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LogseqGit.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LogseqGit"
+        BUNDLE_LOADER: "$(TEST_HOST)"
 
   FileProviderExtension:
     type: app-extension
