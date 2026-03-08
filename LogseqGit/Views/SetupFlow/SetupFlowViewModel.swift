@@ -26,7 +26,7 @@ final class SetupFlowViewModel: ObservableObject {
 
     // MARK: - Auth Config
 
-    @Published var authMethod: AuthMethod = .ssh
+    @Published var authMethod: AuthMethod = .https
 
     // MARK: - Error State
 
@@ -55,6 +55,10 @@ final class SetupFlowViewModel: ObservableObject {
 
     // MARK: - Helpers
 
+    /// Tracks the previous derived graph name so we can detect whether the user
+    /// has manually edited the field vs. it still matching the auto-derived value.
+    private var previousDerivedGraphName: String = ""
+
     /// Derives a graph name from the remote URL if the user hasn't provided one.
     func deriveGraphName(from url: String) -> String {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -71,9 +75,10 @@ final class SetupFlowViewModel: ObservableObject {
     /// hasn't manually edited the graph name.
     func updateGraphNameIfNeeded() {
         let derived = deriveGraphName(from: remoteURL)
-        if graphName.isEmpty || graphName == derived {
-            graphName = deriveGraphName(from: remoteURL)
+        if graphName.isEmpty || graphName == previousDerivedGraphName {
+            graphName = derived
         }
+        previousDerivedGraphName = derived
     }
 
     // MARK: - Navigation Actions

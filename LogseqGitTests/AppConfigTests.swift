@@ -5,9 +5,8 @@ final class AppConfigTests: XCTestCase {
 
     func testCodableRoundtripWithAllFields() throws {
         let config = AppConfig(
-            remoteURL: "git@github.com:user/repo.git",
-            authMethod: .ssh,
-            sshKeyRef: "key-ref-123",
+            remoteURL: "https://github.com/user/repo.git",
+            authMethod: .https,
             branch: "develop",
             graphName: "my-graph",
             commitMessageTemplate: "sync {{device}}",
@@ -29,7 +28,6 @@ final class AppConfigTests: XCTestCase {
         let config = AppConfig(
             remoteURL: "https://github.com/user/repo.git",
             authMethod: .https,
-            sshKeyRef: nil,
             lastPull: nil,
             lastPush: nil
         )
@@ -42,18 +40,52 @@ final class AppConfigTests: XCTestCase {
         let data = try encoder.encode(config)
         let decoded = try decoder.decode(AppConfig.self, from: data)
         XCTAssertEqual(decoded, config)
-        XCTAssertNil(decoded.sshKeyRef)
         XCTAssertNil(decoded.lastPull)
         XCTAssertNil(decoded.lastPush)
     }
 
+    func testLegacySSHAuthMethodDecodesToHTTPS() throws {
+        let json = """
+        {
+            "remoteURL": "git@github.com:user/repo.git",
+            "authMethod": "ssh",
+            "branch": "main",
+            "graphName": "",
+            "commitMessageTemplate": "sync"
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let config = try decoder.decode(AppConfig.self, from: json)
+        XCTAssertEqual(config.authMethod, .https)
+    }
+
+    func testInvalidAuthMethodThrows() {
+        let json = """
+        {
+            "remoteURL": "https://github.com/user/repo.git",
+            "authMethod": "bogus",
+            "branch": "main",
+            "graphName": "",
+            "commitMessageTemplate": "sync"
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        XCTAssertThrowsError(try decoder.decode(AppConfig.self, from: json)) { error in
+            XCTAssertTrue(error is DecodingError)
+        }
+    }
+
     func testDefaultValues() {
-        let config = AppConfig(remoteURL: "git@host:user/repo.git", authMethod: .ssh)
+        let config = AppConfig(remoteURL: "https://github.com/user/repo.git")
+        XCTAssertEqual(config.authMethod, .https)
         XCTAssertEqual(config.branch, "main")
         XCTAssertEqual(config.graphName, "")
         XCTAssertEqual(config.commitMessageTemplate, "Auto-sync from {{device}} at {{timestamp}}")
         XCTAssertNil(config.lastPull)
         XCTAssertNil(config.lastPush)
-        XCTAssertNil(config.sshKeyRef)
     }
 }

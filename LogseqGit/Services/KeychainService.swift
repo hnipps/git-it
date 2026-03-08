@@ -17,6 +17,7 @@ enum KeychainError: LocalizedError {
     case unexpectedData
     case unhandledError(status: OSStatus)
     case invalidKeyFormat
+    case unsupportedKeyFormat(String)
 
     var errorDescription: String? {
         switch self {
@@ -30,6 +31,8 @@ enum KeychainError: LocalizedError {
             return "Keychain error: \(status)"
         case .invalidKeyFormat:
             return "The provided key data is not in a valid format."
+        case .unsupportedKeyFormat(let message):
+            return message
         }
     }
 }
@@ -79,11 +82,12 @@ final class KeychainService {
     // MARK: - SSH Key Management
 
     /// Import an SSH private key from raw `Data`.
-    /// Validates the key format before storing.
+    /// Validates the key format and checks library compatibility before storing.
     func importSSHKey(privateKeyData: Data) throws {
         guard validateSSHKey(privateKeyData) != nil else {
             throw KeychainError.invalidKeyFormat
         }
+        try checkKeyCompatibility(privateKeyData)
         try saveOrUpdate(
             data: privateKeyData,
             service: ServiceIdentifier.sshPrivateKey,
@@ -176,6 +180,31 @@ final class KeychainService {
         return nil
     }
 
+    /// Check whether a validated key is compatible with the bundled libssh2/OpenSSL libraries.
+    ///
+    /// The bundled libssh2 1.7.0 + OpenSSL 1.0.2 only support PEM-format RSA and DSA keys.
+    /// OpenSSH-format keys and ECDSA/ed25519 algorithms will fail at authentication time,
+    /// so we reject them here with actionable error messages.
+    func checkKeyCompatibility(_ keyData: Data) throws {
+        guard let text = String(data: keyData, encoding: .utf8) else {
+            throw KeychainError.invalidKeyFormat
+        }
+
+        if text.contains("-----BEGIN OPENSSH PRIVATE KEY-----") {
+            throw KeychainError.unsupportedKeyFormat(
+                "This key is in OpenSSH format, which is not yet supported. "
+                + "Please convert it to PEM format:\n"
+                + "ssh-keygen -p -N \"\" -m pem -f ~/.ssh/your_key"
+            )
+        }
+
+        if text.contains("-----BEGIN EC PRIVATE KEY-----") {
+            throw KeychainError.unsupportedKeyFormat(
+                "ECDSA keys are not yet supported. Please use an RSA key in PEM format."
+            )
+        }
+    }
+
     // MARK: - HTTPS PAT Management
 
     /// Store a Personal Access Token.
@@ -214,7 +243,6 @@ final class KeychainService {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecAttrAccessGroup as String: Constants.keychainAccessGroup,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
         ]
     }

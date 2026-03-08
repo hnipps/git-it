@@ -4,8 +4,7 @@ enum Constants {
     // MARK: - Identifiers
 
     static let appGroupID = "group.com.logseqgit"
-    static let keychainAccessGroup = "com.logseqgit.shared"
-    static let fileProviderDomainID = "logseq-repo"
+static let fileProviderDomainID = "logseq-repo"
     static let bgTaskIdentifier = "com.logseqgit.sync"
 
     // MARK: - Shared Container Paths

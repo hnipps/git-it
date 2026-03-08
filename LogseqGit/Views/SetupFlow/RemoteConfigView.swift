@@ -10,6 +10,7 @@ struct RemoteConfigView: View {
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .accessibilityIdentifier(AccessibilityID.remoteURLField)
                     .onChange(of: viewModel.remoteURL) { _ in
                         viewModel.updateGraphNameIfNeeded()
                     }
@@ -23,6 +24,7 @@ struct RemoteConfigView: View {
                 TextField("main", text: $viewModel.branch)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .accessibilityIdentifier(AccessibilityID.branchField)
             } header: {
                 Text("Branch")
             } footer: {
@@ -33,6 +35,7 @@ struct RemoteConfigView: View {
                 TextField("my-graph", text: $viewModel.graphName)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .accessibilityIdentifier(AccessibilityID.graphNameField)
             } header: {
                 Text("Graph Name")
             } footer: {
@@ -45,6 +48,7 @@ struct RemoteConfigView: View {
                 Button("Next") {
                     viewModel.advanceToAuth()
                 }
+                .accessibilityIdentifier(AccessibilityID.remoteNextButton)
                 .disabled(viewModel.remoteURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }

@@ -1,9 +1,28 @@
 import Foundation
 
 /// Represents the authentication method used to communicate with the remote repository.
-enum AuthMethod: String, Codable, CaseIterable {
-    case ssh
+enum AuthMethod: String, CaseIterable {
     case https
+
+    /// SSH was removed (GitHub rejects SHA-1 signatures from bundled libssh2).
+    /// Existing configs that stored "ssh" are migrated to .https on decode.
+    private static let legacyMappings: [String: AuthMethod] = ["ssh": .https]
+}
+
+extension AuthMethod: Codable {
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let value = AuthMethod(rawValue: raw) {
+            self = value
+        } else if let mapped = AuthMethod.legacyMappings[raw] {
+            self = mapped
+        } else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: decoder.codingPath,
+                      debugDescription: "Cannot initialize AuthMethod from invalid String value \(raw)")
+            )
+        }
+    }
 }
 
 /// Persisted application configuration that is shared between the main app and the File Provider extension.
@@ -13,9 +32,6 @@ struct AppConfig: Codable, Equatable {
 
     /// The authentication method for the remote.
     var authMethod: AuthMethod
-
-    /// An optional keychain reference for the SSH private key.
-    var sshKeyRef: String?
 
     /// The branch to track and sync against.
     var branch: String
@@ -37,8 +53,7 @@ struct AppConfig: Codable, Equatable {
 
     init(
         remoteURL: String,
-        authMethod: AuthMethod,
-        sshKeyRef: String? = nil,
+        authMethod: AuthMethod = .https,
         branch: String = "main",
         graphName: String = "",
         commitMessageTemplate: String = "Auto-sync from {{device}} at {{timestamp}}",
@@ -47,7 +62,6 @@ struct AppConfig: Codable, Equatable {
     ) {
         self.remoteURL = remoteURL
         self.authMethod = authMethod
-        self.sshKeyRef = sshKeyRef
         self.branch = branch
         self.graphName = graphName
         self.commitMessageTemplate = commitMessageTemplate

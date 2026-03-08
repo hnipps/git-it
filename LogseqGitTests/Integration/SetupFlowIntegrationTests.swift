@@ -32,7 +32,7 @@ final class SetupFlowIntegrationTests: XCTestCase {
         XCTAssertEqual(vm.graphName, "my-notes")
 
         // Step 3: Set auth method
-        vm.authMethod = .ssh
+        vm.authMethod = .https
 
         // Step 4: Advance through remaining steps
         vm.advanceToClone()
@@ -54,7 +54,7 @@ final class SetupFlowIntegrationTests: XCTestCase {
         let loaded = configService.loadConfig()
         XCTAssertNotNil(loaded)
         XCTAssertEqual(loaded?.remoteURL, "git@github.com:user/my-notes.git")
-        XCTAssertEqual(loaded?.authMethod, .ssh)
+        XCTAssertEqual(loaded?.authMethod, .https)
         XCTAssertEqual(loaded?.branch, "main")
         XCTAssertEqual(loaded?.graphName, "my-notes")
         XCTAssertTrue(configService.isSetupComplete)

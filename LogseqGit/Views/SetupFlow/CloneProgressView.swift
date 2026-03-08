@@ -1,3 +1,4 @@
+import FileProvider
 import SwiftUI
 
 struct CloneProgressView: View {
@@ -38,6 +39,7 @@ struct CloneProgressView: View {
         Text(statusText)
             .font(.headline)
             .foregroundColor(.secondary)
+            .accessibilityIdentifier(AccessibilityID.cloneStatusText)
     }
 
     // MARK: - Error Content
@@ -67,6 +69,7 @@ struct CloneProgressView: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
+        .accessibilityIdentifier(AccessibilityID.cloneRetryButton)
         .padding(.horizontal, 40)
         .padding(.top, 8)
     }
@@ -81,6 +84,10 @@ struct CloneProgressView: View {
         do {
             // Brief delay so the user sees the "Connecting" state.
             try await Task.sleep(nanoseconds: 500_000_000)
+
+            // Save configuration BEFORE clone so credentials can be resolved.
+            try await viewModel.saveConfig()
+
             statusText = "Cloning repository..."
 
             try await viewModel.gitService.clone(
@@ -88,11 +95,25 @@ struct CloneProgressView: View {
                 branch: viewModel.branch
             )
 
+            statusText = "Indexing files..."
+
+            // Populate the File Provider metadata database with cloned files.
+            MetadataDatabase.shared.syncWithDisk(
+                repoURL: Constants.repoPath,
+                excludedPaths: RepoManager.exclusionPatterns
+            )
+
+            // Signal the File Provider so it picks up the new items.
+            let domain = NSFileProviderDomain(
+                identifier: NSFileProviderDomainIdentifier(rawValue: Constants.fileProviderDomainID),
+                displayName: "Logseq"
+            )
+            if let manager = NSFileProviderManager(for: domain) {
+                try? await manager.signalEnumerator(for: .workingSet)
+                try? await manager.signalEnumerator(for: .rootContainer)
+            }
+
             statusText = "Done!"
-
-            // Save configuration after successful clone.
-            try await viewModel.saveConfig()
-
             isCloning = false
 
             // Short pause so "Done!" is visible before advancing.

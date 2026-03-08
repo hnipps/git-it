@@ -6,7 +6,6 @@ import SwiftGit2
 
 struct GitCredentialContext {
     enum AuthType {
-        case ssh(privateKey: String)
         case plaintext(username: String, password: String)
         case none
     }
@@ -23,19 +22,29 @@ private func gitCredentialCallback(
     allowedTypes: UInt32,
     payload: UnsafeMutableRawPointer?
 ) -> Int32 {
-    guard let payload = payload else { return -1 }
+    let urlStr = url.map { String(cString: $0) } ?? "nil"
+    let userStr = username.map { String(cString: $0) } ?? "nil"
+    print("[GitCredential] callback invoked — url: \(urlStr), username: \(userStr), allowedTypes: \(allowedTypes)")
+
+    guard let payload = payload else {
+        print("[GitCredential] ERROR: payload is nil")
+        return -1
+    }
     let ctx = payload.assumingMemoryBound(to: GitCredentialContext.self).pointee
 
     let result: Int32
     switch ctx.auth {
-    case .ssh(let key):
-        result = git_cred_ssh_key_memory_new(cred, "git", nil, key, "")
     case .plaintext(let user, let pass):
+        print("[GitCredential] attempting plaintext auth (user: \(user))")
         result = git_cred_userpass_plaintext_new(cred, user, pass)
     case .none:
+        print("[GitCredential] attempting default credentials")
         result = git_cred_default_new(cred)
     }
-    return (result != GIT_OK.rawValue) ? -1 : 0
+
+    let returnVal: Int32 = (result != GIT_OK.rawValue) ? -1 : 0
+    print("[GitCredential] returning: \(returnVal)")
+    return returnVal
 }
 
 // MARK: - GitCredentialHelper
@@ -49,6 +58,7 @@ enum GitCredentialHelper {
         } else {
             message = "Unknown error"
         }
+        print("[GitCredentialHelper] \(pointOfFailure) error (code \(code)): \(message)")
         return NSError(
             domain: "com.logseqgit.git",
             code: Int(code),
@@ -56,6 +66,34 @@ enum GitCredentialHelper {
                 NSLocalizedDescriptionKey: "\(pointOfFailure) failed: \(message)"
             ]
         )
+    }
+
+    /// Clones a remote repository with credential authentication.
+    /// Uses git_clone directly to bypass SwiftGit2's credential callback which ignores allowedTypes.
+    static func clone(from remoteURL: String, to localPath: URL, credentials: GitCredentialContext) -> Result<Repository, NSError> {
+        git_libgit2_init()
+
+        let pointer = UnsafeMutablePointer<git_clone_options>.allocate(capacity: 1)
+        git_clone_init_options(pointer, UInt32(GIT_CLONE_OPTIONS_VERSION))
+        var opts = pointer.move()
+        pointer.deallocate()
+
+        var ctx = credentials
+        let result: Result<Repository, NSError> = withUnsafeMutablePointer(to: &ctx) { ctxPtr in
+            opts.fetch_opts.callbacks.payload = UnsafeMutableRawPointer(ctxPtr)
+            opts.fetch_opts.callbacks.credentials = gitCredentialCallback
+
+            var repoPointer: OpaquePointer? = nil
+            let cloneResult = localPath.withUnsafeFileSystemRepresentation { localCStr in
+                git_clone(&repoPointer, remoteURL, localCStr, &opts)
+            }
+
+            guard cloneResult == GIT_OK.rawValue, let repoPointer = repoPointer else {
+                return .failure(makeError(cloneResult, "git_clone"))
+            }
+            return .success(Repository(repoPointer))
+        }
+        return result
     }
 
     /// Fetches from the named remote with credential authentication.

@@ -18,6 +18,7 @@ struct InstructionsView: View {
                     onDismiss()
                 }
                 .fontWeight(.semibold)
+                .accessibilityIdentifier(AccessibilityID.instructionsDoneButton)
             }
         }
     }

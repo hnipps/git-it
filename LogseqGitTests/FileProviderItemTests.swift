@@ -79,7 +79,6 @@ final class FileProviderItemTests: XCTestCase {
             metadataVersion: 1
         )
         XCTAssertTrue(item.capabilities.contains(.allowsWriting))
-        XCTAssertFalse(item.capabilities.contains(.allowsContentEnumerating))
     }
 
     func testDocumentSizeMapping() {

@@ -24,7 +24,7 @@ final class ConfigSyncLoggerIntegrationTests: XCTestCase {
         // Save config
         let config = AppConfig(
             remoteURL: "git@github.com:user/repo.git",
-            authMethod: .ssh,
+            authMethod: .https,
             branch: "main",
             graphName: "repo"
         )

@@ -172,9 +172,18 @@ struct MainView: View {
     private var graphInfoSection: some View {
         Section {
             if let config = viewModel.config {
-                LabeledContent("Graph", value: config.graphName.isEmpty ? "Unnamed" : config.graphName)
-                LabeledContent("Remote", value: truncatedURL(config.remoteURL))
-                LabeledContent("Branch", value: config.branch)
+                LabeledContent("Graph") {
+                    Text(config.graphName.isEmpty ? "Unnamed" : config.graphName)
+                        .accessibilityIdentifier(AccessibilityID.graphNameLabel)
+                }
+                LabeledContent("Remote") {
+                    Text(truncatedURL(config.remoteURL))
+                        .accessibilityIdentifier(AccessibilityID.remoteURLLabel)
+                }
+                LabeledContent("Branch") {
+                    Text(config.branch)
+                        .accessibilityIdentifier(AccessibilityID.branchLabel)
+                }
             } else {
                 Text("No configuration found")
                     .foregroundStyle(.secondary)
@@ -191,6 +200,7 @@ struct MainView: View {
             HStack {
                 statusDot
                 Text(statusLabel)
+                    .accessibilityIdentifier(AccessibilityID.statusText)
             }
 
             if let config = viewModel.config {
@@ -256,6 +266,7 @@ struct MainView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .accessibilityIdentifier(AccessibilityID.pullButton)
                 .disabled(viewModel.isSyncing)
 
                 Button {
@@ -265,6 +276,7 @@ struct MainView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .accessibilityIdentifier(AccessibilityID.pushButton)
                 .disabled(viewModel.isSyncing)
             }
             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
@@ -283,6 +295,7 @@ struct MainView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier(AccessibilityID.syncNowButton)
             .disabled(viewModel.isSyncing)
             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
         }

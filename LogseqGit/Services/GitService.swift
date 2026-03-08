@@ -1,3 +1,4 @@
+import Clibgit2
 import Combine
 import FileProvider
 import Foundation
@@ -139,21 +140,15 @@ final class GitService: ObservableObject {
                     try FileManager.default.removeItem(at: repoPath)
                 }
 
-                guard let remoteURLObj = URL(string: remoteURL) else {
-                    throw GitError.cloneFailed("Invalid remote URL")
-                }
+                print("[GitService] clone URL: \(remoteURL)")
 
-                let result = Repository.clone(
-                    from: remoteURLObj,
+                let cloneResult = GitCredentialHelper.clone(
+                    from: remoteURL,
                     to: repoPath,
-                    localClone: false,
-                    bare: false,
-                    credentials: self.swiftGit2Credentials(),
-                    checkoutStrategy: .Force,
-                    checkoutProgress: nil
+                    credentials: self.credentialContext()
                 )
 
-                switch result {
+                switch cloneResult {
                 case .success(let repo):
                     // Check out the requested branch if it differs from the default.
                     let currentBranch = repo.localBranch(named: branch)
@@ -432,23 +427,16 @@ final class GitService: ObservableObject {
     /// Returns a `GitCredentialContext` for use with `GitCredentialHelper` (fetch/push).
     private func credentialContext() -> GitCredentialContext {
         guard let config = configService.loadConfig() else {
+            print("[GitService] credentialContext: no config loaded")
             return GitCredentialContext(auth: .none)
         }
+        print("[GitService] credentialContext: authMethod=\(config.authMethod)")
 
-        switch config.authMethod {
-        case .ssh:
-            guard let keyData = try? keychainService.getSSHPrivateKey(),
-                  let keyString = String(data: keyData, encoding: .utf8) else {
-                return GitCredentialContext(auth: .none)
-            }
-            return GitCredentialContext(auth: .ssh(privateKey: keyString))
-
-        case .https:
-            guard let token = try? keychainService.getPAT() else {
-                return GitCredentialContext(auth: .none)
-            }
-            return GitCredentialContext(auth: .plaintext(username: "logseqgit", password: token))
+        guard let token = try? keychainService.getPAT() else {
+            print("[GitService] credentialContext: no PAT in keychain")
+            return GitCredentialContext(auth: .none)
         }
+        return GitCredentialContext(auth: .plaintext(username: "logseqgit", password: token))
     }
 
     /// Returns `Credentials` for SwiftGit2 operations that accept it directly (e.g. clone).
@@ -457,20 +445,10 @@ final class GitService: ObservableObject {
             return .default
         }
 
-        switch config.authMethod {
-        case .ssh:
-            guard let keyData = try? keychainService.getSSHPrivateKey(),
-                  let keyString = String(data: keyData, encoding: .utf8) else {
-                return .default
-            }
-            return .sshMemory(username: "git", privateKey: keyString, passphrase: "")
-
-        case .https:
-            guard let token = try? keychainService.getPAT() else {
-                return .default
-            }
-            return .plaintext(username: "logseqgit", password: token)
+        guard let token = try? keychainService.getPAT() else {
+            return .default
         }
+        return .plaintext(username: "logseqgit", password: token)
     }
 
     // MARK: - Helpers (Private)
@@ -542,7 +520,8 @@ final class GitService: ObservableObject {
     /// Maps a SwiftGit2 error into a typed ``GitError``.
     private func mapError(_ error: NSError, as kind: (String) -> GitError) -> GitError {
         let message = error.localizedDescription
-        if message.lowercased().contains("auth") || message.lowercased().contains("credential") {
+        print("[GitService] raw libgit2 error: \(message)")
+        if message.lowercased().contains("authentication") || message.lowercased().contains("credential") {
             return .authenticationFailed
         }
         if message.lowercased().contains("network") || message.lowercased().contains("resolve") {

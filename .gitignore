@@ -13,3 +13,6 @@ build/
 
 # OS
 .DS_Store
+
+# UI test credentials (contains PAT — never commit)
+LogseqGitUITests/UITestConfig.json

@@ -9,7 +9,7 @@ final class SettingsViewModel: ObservableObject {
     @Published var remoteURL: String = ""
     @Published var branch: String = ""
     @Published var graphName: String = ""
-    @Published var authMethod: AuthMethod = .ssh
+    @Published var authMethod: AuthMethod = .https
     @Published var commitMessageTemplate: String = ""
 
     @Published var hasUnsavedChanges: Bool = false
@@ -18,13 +18,11 @@ final class SettingsViewModel: ObservableObject {
 
     // MARK: - Sheet State
 
-    @Published var showSSHKeySheet: Bool = false
     @Published var showPATSheet: Bool = false
     @Published var showClearLogsConfirmation: Bool = false
     @Published var showResetConfirmation: Bool = false
     @Published var showExportSheet: Bool = false
 
-    @Published var newSSHKey: String = ""
     @Published var newPAT: String = ""
 
     // MARK: - Dependencies
@@ -86,18 +84,6 @@ final class SettingsViewModel: ObservableObject {
     }
 
     // MARK: - Auth Actions
-
-    @MainActor
-    func saveSSHKey() async {
-        errorMessage = nil
-        do {
-            try keychainService.importSSHKey(fromText: newSSHKey)
-            newSSHKey = ""
-            showSSHKeySheet = false
-        } catch {
-            errorMessage = "Failed to import SSH key: \(error.localizedDescription)"
-        }
-    }
 
     @MainActor
     func savePAT() async {
@@ -217,59 +203,16 @@ struct SettingsView: View {
 
     private var authenticationSection: some View {
         Section {
-            LabeledContent("Method", value: viewModel.authMethod == .ssh ? "SSH" : "HTTPS")
+            LabeledContent("Method", value: "HTTPS")
 
-            if viewModel.authMethod == .ssh {
-                Button("Change SSH Key") {
-                    viewModel.showSSHKeySheet = true
-                }
-                .sheet(isPresented: $viewModel.showSSHKeySheet) {
-                    sshKeySheet
-                }
-            } else {
-                Button("Change Token") {
-                    viewModel.showPATSheet = true
-                }
-                .sheet(isPresented: $viewModel.showPATSheet) {
-                    patSheet
-                }
+            Button("Change Token") {
+                viewModel.showPATSheet = true
+            }
+            .sheet(isPresented: $viewModel.showPATSheet) {
+                patSheet
             }
         } header: {
             Text("Authentication")
-        }
-    }
-
-    private var sshKeySheet: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextEditor(text: $viewModel.newSSHKey)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: 200)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                } header: {
-                    Text("Paste your SSH private key")
-                } footer: {
-                    Text("The key should begin with -----BEGIN OPENSSH PRIVATE KEY----- or similar.")
-                }
-            }
-            .navigationTitle("SSH Key")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        viewModel.newSSHKey = ""
-                        viewModel.showSSHKeySheet = false
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        Task { await viewModel.saveSSHKey() }
-                    }
-                    .disabled(viewModel.newSSHKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
         }
     }
 

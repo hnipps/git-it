@@ -23,7 +23,7 @@ final class ConfigServiceTests: XCTestCase {
     func testSaveAndLoadRoundtrip() throws {
         let config = AppConfig(
             remoteURL: "git@github.com:user/repo.git",
-            authMethod: .ssh,
+            authMethod: .https,
             branch: "main",
             graphName: "repo"
         )
@@ -41,7 +41,7 @@ final class ConfigServiceTests: XCTestCase {
     }
 
     func testIsSetupCompleteReturnsFalseWhenEmptyRemoteURL() throws {
-        let config = AppConfig(remoteURL: "", authMethod: .ssh)
+        let config = AppConfig(remoteURL: "", authMethod: .https)
         try service.saveConfig(config)
         XCTAssertFalse(service.isSetupComplete)
     }
@@ -49,7 +49,7 @@ final class ConfigServiceTests: XCTestCase {
     func testIsSetupCompleteReturnsTrueWhenConfigured() throws {
         let config = AppConfig(
             remoteURL: "git@github.com:user/repo.git",
-            authMethod: .ssh
+            authMethod: .https
         )
         try service.saveConfig(config)
         XCTAssertTrue(service.isSetupComplete)

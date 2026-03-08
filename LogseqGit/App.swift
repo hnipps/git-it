@@ -31,6 +31,17 @@ final class AppState: ObservableObject {
     /// Perform one-time launch setup: register the File Provider domain and
     /// schedule background tasks.
     func bootstrap() async {
+        if CommandLine.arguments.contains("--uitesting-reset") {
+            let domain = NSFileProviderDomain(
+                identifier: NSFileProviderDomainIdentifier(rawValue: Constants.fileProviderDomainID),
+                displayName: "Logseq"
+            )
+            try? await NSFileProviderManager.remove(domain)
+
+            try? FileManager.default.removeItem(at: Constants.configFilePath)
+            try? FileManager.default.removeItem(at: Constants.repoPath)
+            try? KeychainService.shared.deletePAT()
+        }
         await checkSetupState()
         await registerFileProviderDomain()
         BackgroundSyncService.shared.registerBackgroundTask()
