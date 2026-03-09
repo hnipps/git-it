@@ -25,8 +25,13 @@ extension AuthMethod: Codable {
     }
 }
 
+enum RepoMode: String, CaseIterable, Codable, Equatable {
+    case legacyProvider
+    case logseqFolder
+}
+
 /// Persisted application configuration that is shared between the main app and the File Provider extension.
-struct AppConfig: Codable, Equatable {
+struct AppConfig: Equatable {
     /// The remote Git repository URL (e.g. git@github.com:user/repo.git or https://...).
     var remoteURL: String
 
@@ -49,6 +54,10 @@ struct AppConfig: Codable, Equatable {
     /// Timestamp of the last successful push.
     var lastPush: Date?
 
+    var repoMode: RepoMode
+    var repoFolderBookmarkData: Data?
+    var repoFolderDisplayName: String?
+
     // MARK: - Defaults
 
     init(
@@ -58,7 +67,10 @@ struct AppConfig: Codable, Equatable {
         graphName: String = "",
         commitMessageTemplate: String = "Auto-sync from {{device}} at {{timestamp}}",
         lastPull: Date? = nil,
-        lastPush: Date? = nil
+        lastPush: Date? = nil,
+        repoMode: RepoMode = .legacyProvider,
+        repoFolderBookmarkData: Data? = nil,
+        repoFolderDisplayName: String? = nil
     ) {
         self.remoteURL = remoteURL
         self.authMethod = authMethod
@@ -67,5 +79,52 @@ struct AppConfig: Codable, Equatable {
         self.commitMessageTemplate = commitMessageTemplate
         self.lastPull = lastPull
         self.lastPush = lastPush
+        self.repoMode = repoMode
+        self.repoFolderBookmarkData = repoFolderBookmarkData
+        self.repoFolderDisplayName = repoFolderDisplayName
+    }
+}
+
+extension AppConfig: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case remoteURL
+        case authMethod
+        case branch
+        case graphName
+        case commitMessageTemplate
+        case lastPull
+        case lastPush
+        case repoMode
+        case repoFolderBookmarkData
+        case repoFolderDisplayName
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        remoteURL = try container.decode(String.self, forKey: .remoteURL)
+        authMethod = try container.decode(AuthMethod.self, forKey: .authMethod)
+        branch = try container.decodeIfPresent(String.self, forKey: .branch) ?? "main"
+        graphName = try container.decodeIfPresent(String.self, forKey: .graphName) ?? ""
+        commitMessageTemplate = try container.decodeIfPresent(String.self, forKey: .commitMessageTemplate)
+            ?? "Auto-sync from {{device}} at {{timestamp}}"
+        lastPull = try container.decodeIfPresent(Date.self, forKey: .lastPull)
+        lastPush = try container.decodeIfPresent(Date.self, forKey: .lastPush)
+        repoMode = try container.decodeIfPresent(RepoMode.self, forKey: .repoMode) ?? .legacyProvider
+        repoFolderBookmarkData = try container.decodeIfPresent(Data.self, forKey: .repoFolderBookmarkData)
+        repoFolderDisplayName = try container.decodeIfPresent(String.self, forKey: .repoFolderDisplayName)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(remoteURL, forKey: .remoteURL)
+        try container.encode(authMethod, forKey: .authMethod)
+        try container.encode(branch, forKey: .branch)
+        try container.encode(graphName, forKey: .graphName)
+        try container.encode(commitMessageTemplate, forKey: .commitMessageTemplate)
+        try container.encodeIfPresent(lastPull, forKey: .lastPull)
+        try container.encodeIfPresent(lastPush, forKey: .lastPush)
+        try container.encode(repoMode, forKey: .repoMode)
+        try container.encodeIfPresent(repoFolderBookmarkData, forKey: .repoFolderBookmarkData)
+        try container.encodeIfPresent(repoFolderDisplayName, forKey: .repoFolderDisplayName)
     }
 }

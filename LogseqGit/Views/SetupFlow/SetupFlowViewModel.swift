@@ -6,6 +6,7 @@ import SwiftUI
 enum SetupStep: Int, CaseIterable {
     case remote
     case auth
+    case folder
     case clone
     case instructions
 }
@@ -28,6 +29,10 @@ final class SetupFlowViewModel: ObservableObject {
 
     @Published var authMethod: AuthMethod = .https
 
+    @Published var selectedGraphFolderURL: URL?
+    @Published var selectedGraphFolderDisplayName: String = ""
+    @Published var selectedRepoMode: RepoMode = .logseqFolder
+
     // MARK: - Error State
 
     @Published var errorMessage: String?
@@ -37,16 +42,22 @@ final class SetupFlowViewModel: ObservableObject {
     let gitService: GitService
     let keychainService: KeychainService
     let configService: ConfigService
+    private let bookmarkService: SecurityScopedBookmarkServicing
+    private let folderValidator: LogseqFolderValidating
 
     // MARK: - Init
 
     init(
         gitService: GitService? = nil,
         keychainService: KeychainService = .shared,
-        configService: ConfigService = .shared
+        configService: ConfigService = .shared,
+        bookmarkService: SecurityScopedBookmarkServicing = SecurityScopedBookmarkService.shared,
+        folderValidator: LogseqFolderValidating = LogseqFolderValidator.shared
     ) {
         self.keychainService = keychainService
         self.configService = configService
+        self.bookmarkService = bookmarkService
+        self.folderValidator = folderValidator
         self.gitService = gitService ?? GitService(
             keychainService: keychainService,
             configService: configService
@@ -91,7 +102,15 @@ final class SetupFlowViewModel: ObservableObject {
     }
 
     func advanceToClone() {
+        guard selectedRepoMode == .legacyProvider || selectedGraphFolderURL != nil else {
+            errorMessage = "Pick a graph folder inside Files > Logseq before continuing."
+            return
+        }
         currentStep = .clone
+    }
+
+    func advanceToFolder() {
+        currentStep = .folder
     }
 
     func advanceToInstructions() {
@@ -101,12 +120,43 @@ final class SetupFlowViewModel: ObservableObject {
     // MARK: - Config Persistence
 
     func saveConfig() async throws {
+        let bookmarkData: Data?
+        if selectedRepoMode == .logseqFolder, let folderURL = selectedGraphFolderURL {
+            bookmarkData = try bookmarkService.createBookmarkData(for: folderURL)
+        } else {
+            bookmarkData = nil
+        }
+
         let config = AppConfig(
             remoteURL: remoteURL,
             authMethod: authMethod,
             branch: branch,
-            graphName: graphName
+            graphName: graphName,
+            repoMode: selectedRepoMode,
+            repoFolderBookmarkData: bookmarkData,
+            repoFolderDisplayName: selectedGraphFolderDisplayName.isEmpty ? nil : selectedGraphFolderDisplayName
         )
         try await configService.saveConfig(config)
+    }
+
+    func selectGraphFolder(_ folderURL: URL) {
+        do {
+            try folderValidator.validate(folderURL)
+            selectedGraphFolderURL = folderURL
+            selectedGraphFolderDisplayName = folderURL.lastPathComponent
+            selectedRepoMode = .logseqFolder
+            errorMessage = nil
+        } catch {
+            selectedGraphFolderURL = nil
+            selectedGraphFolderDisplayName = ""
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func useLegacyProviderStorage() {
+        selectedRepoMode = .legacyProvider
+        selectedGraphFolderURL = Constants.repoPath
+        selectedGraphFolderDisplayName = "Git It (Legacy)"
+        errorMessage = nil
     }
 }

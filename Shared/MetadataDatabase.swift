@@ -1,6 +1,7 @@
 import Foundation
 import FileProvider
 import SQLite3
+import os
 
 /// Thread-safe SQLite database manager for File Provider item identifier mapping.
 ///
@@ -48,6 +49,8 @@ final class MetadataDatabase {
         let result = sqlite3_open_v2(path, &db, flags, nil)
         guard result == SQLITE_OK else {
             let msg = String(cString: sqlite3_errmsg(db))
+            Logger(subsystem: "com.logseqgit.fileprovider", category: "MetadataDatabase")
+                .fault("Failed to open database at \(path): \(msg)")
             fatalError("MetadataDatabase: failed to open database at \(path): \(msg)")
         }
         // Enable WAL mode for concurrent reads

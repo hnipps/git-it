@@ -1,10 +1,12 @@
 import Foundation
+import os
 
 enum Constants {
     // MARK: - Identifiers
 
     static let appGroupID = "group.com.logseqgit"
 static let fileProviderDomainID = "logseq-repo"
+    static let fileProviderDomainDisplayName = "LogseqGit"
     static let bgTaskIdentifier = "com.logseqgit.sync"
 
     // MARK: - Shared Container Paths
@@ -13,6 +15,8 @@ static let fileProviderDomainID = "logseq-repo"
         guard let url = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupID
         ) else {
+            Logger(subsystem: "com.logseqgit.fileprovider", category: "Constants")
+                .fault("Shared container not available for app group: \(appGroupID)")
             fatalError("Shared container not available for app group: \(appGroupID)")
         }
         return url

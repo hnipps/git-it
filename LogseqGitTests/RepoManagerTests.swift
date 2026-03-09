@@ -2,8 +2,7 @@ import XCTest
 @testable import LogseqGit
 
 final class RepoManagerTests: XCTestCase {
-
-    private let manager = RepoManager.shared
+    private let manager = RepoManager(repoRootResolver: RepoManagerResolverMock())
 
     func testExcludesGitDirectory() {
         XCTAssertTrue(manager.shouldExclude(relativePath: ".git/HEAD"))
@@ -33,4 +32,10 @@ final class RepoManagerTests: XCTestCase {
     func testDoesNotExcludeJournalFile() {
         XCTAssertFalse(manager.shouldExclude(relativePath: "journals/2024-01-01.md"))
     }
+}
+
+private struct RepoManagerResolverMock: RepoRootResolving {
+    func resolveRepoRootURL() throws -> URL { Constants.repoPath }
+    func resolveRepoMode() -> RepoMode { .legacyProvider }
+    func shouldUseLegacyFileProviderStorage() -> Bool { true }
 }

@@ -1,5 +1,8 @@
 import FileProvider
 import UniformTypeIdentifiers
+import os
+
+private let logger = Logger(subsystem: "com.logseqgit.fileprovider", category: "Extension")
 
 class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
 
@@ -14,6 +17,7 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         self.db = MetadataDatabase.shared
         self.writeMonitor = WriteActivityMonitor()
         super.init()
+        logger.info("FileProviderExtension init for domain: \(domain.identifier.rawValue)")
     }
 
     func invalidate() {
@@ -26,12 +30,14 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         for containerItemIdentifier: NSFileProviderItemIdentifier,
         request: NSFileProviderRequest
     ) throws -> NSFileProviderEnumerator {
+        logger.info("enumerator(for: \(containerItemIdentifier.rawValue))")
         switch containerItemIdentifier {
         case .rootContainer, .workingSet:
             return FileProviderEnumerator(containerIdentifier: containerItemIdentifier, db: db)
         default:
             // Verify the identifier exists in the database
             guard db.path(for: containerItemIdentifier) != nil else {
+                logger.error("enumerator(for:) no such item: \(containerItemIdentifier.rawValue)")
                 throw NSFileProviderError(.noSuchItem)
             }
             return FileProviderEnumerator(containerIdentifier: containerItemIdentifier, db: db)
@@ -52,7 +58,7 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             let root = FileProviderItem(
                 identifier: NSFileProviderItemIdentifier.rootContainer.rawValue,
                 parentIdentifier: NSFileProviderItemIdentifier.rootContainer.rawValue,
-                filename: "",
+                filename: ConfigService.shared.loadConfig()?.graphName ?? "LogseqGit",
                 isDirectory: true,
                 size: nil,
                 creationDate: nil,
@@ -68,6 +74,7 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         if let found = db.getItem(for: identifier) {
             completionHandler(found, nil)
         } else {
+            logger.error("item(for:) not found: \(identifier.rawValue)")
             completionHandler(nil, NSFileProviderError(.noSuchItem))
         }
 
@@ -86,6 +93,7 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         let progress = Progress(totalUnitCount: 1)
 
         guard let relativePath = db.path(for: itemIdentifier) else {
+            logger.error("fetchContents: no path for identifier \(itemIdentifier.rawValue)")
             completionHandler(nil, nil, NSFileProviderError(.noSuchItem))
             progress.completedUnitCount = 1
             return progress
@@ -93,13 +101,27 @@ class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
 
         let fileURL = repoURL.appendingPathComponent(relativePath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            logger.error("fetchContents: file not on disk at \(relativePath)")
             completionHandler(nil, nil, NSFileProviderError(.noSuchItem))
             progress.completedUnitCount = 1
             return progress
         }
 
         let item = db.getItem(for: itemIdentifier)
-        completionHandler(fileURL, item, nil)
+
+        // Copy to a temporary file — the system clones and DELETES the returned URL
+        do {
+            let tempDir = try NSFileProviderManager(for: domain)!.temporaryDirectoryURL()
+            let tempURL = tempDir.appendingPathComponent(
+                UUID().uuidString + "_" + (relativePath as NSString).lastPathComponent
+            )
+            try FileManager.default.copyItem(at: fileURL, to: tempURL)
+            completionHandler(tempURL, item, nil)
+        } catch {
+            logger.error("fetchContents: failed to copy to temp: \(error.localizedDescription)")
+            completionHandler(nil, nil, error)
+        }
+
         progress.completedUnitCount = 1
         return progress
     }

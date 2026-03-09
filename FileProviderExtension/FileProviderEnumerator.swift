@@ -1,4 +1,7 @@
 import FileProvider
+import os
+
+private let logger = Logger(subsystem: "com.logseqgit.fileprovider", category: "Enumerator")
 
 /// Enumerates items and changes for a given container (directory or working set).
 class FileProviderEnumerator: NSObject, NSFileProviderEnumerator {
@@ -36,7 +39,12 @@ class FileProviderEnumerator: NSObject, NSFileProviderEnumerator {
             items = db.enumerateItems(in: containerIdentifier, startingAt: offset, limit: pageSize)
         }
 
-        observer.didEnumerate(items)
+        if items.isEmpty {
+            logger.info("enumerateItems: container=\(self.containerIdentifier.rawValue) offset=\(offset) returned 0 items, skipping didEnumerate")
+        } else {
+            logger.info("enumerateItems: container=\(self.containerIdentifier.rawValue) offset=\(offset) returning \(items.count) items")
+            observer.didEnumerate(items)
+        }
 
         if items.count < pageSize {
             observer.finishEnumerating(upTo: nil)
@@ -54,6 +62,8 @@ class FileProviderEnumerator: NSObject, NSFileProviderEnumerator {
     ) {
         let anchor = decodeSyncAnchor(syncAnchor)
         let changes = db.getChangesSince(anchor: anchor)
+
+        logger.info("enumerateChanges: anchor=\(anchor) updated=\(changes.updated.count) deleted=\(changes.deletedIdentifiers.count)")
 
         if !changes.updated.isEmpty {
             observer.didUpdate(changes.updated)

@@ -5,6 +5,8 @@ final class SetupFlowIntegrationTests: XCTestCase {
 
     private var tempDir: URL!
     private var configService: ConfigService!
+    private var bookmarkService: IntegrationBookmarkServiceMock!
+    private var folderValidator: IntegrationFolderValidatorMock!
 
     override func setUp() {
         super.setUp()
@@ -12,6 +14,8 @@ final class SetupFlowIntegrationTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         configService = ConfigService(fileURL: tempDir.appendingPathComponent("config.json"))
+        bookmarkService = IntegrationBookmarkServiceMock()
+        folderValidator = IntegrationFolderValidatorMock()
     }
 
     override func tearDown() {
@@ -20,7 +24,11 @@ final class SetupFlowIntegrationTests: XCTestCase {
     }
 
     func testFullSetupFlow() throws {
-        let vm = SetupFlowViewModel(configService: configService)
+        let vm = SetupFlowViewModel(
+            configService: configService,
+            bookmarkService: bookmarkService,
+            folderValidator: folderValidator
+        )
 
         // Step 1: Set remote URL
         vm.remoteURL = "git@github.com:user/my-notes.git"
@@ -34,7 +42,10 @@ final class SetupFlowIntegrationTests: XCTestCase {
         // Step 3: Set auth method
         vm.authMethod = .https
 
-        // Step 4: Advance through remaining steps
+        vm.advanceToFolder()
+        XCTAssertEqual(vm.currentStep, .folder)
+        vm.selectGraphFolder(URL(fileURLWithPath: "/private/var/mobile/Logseq/my-notes"))
+
         vm.advanceToClone()
         XCTAssertEqual(vm.currentStep, .clone)
 
@@ -46,7 +57,10 @@ final class SetupFlowIntegrationTests: XCTestCase {
             remoteURL: vm.remoteURL,
             authMethod: vm.authMethod,
             branch: vm.branch,
-            graphName: vm.graphName
+            graphName: vm.graphName,
+            repoMode: .logseqFolder,
+            repoFolderBookmarkData: Data("bookmark".utf8),
+            repoFolderDisplayName: "my-notes"
         )
         try configService.saveConfig(config)
 
@@ -57,6 +71,19 @@ final class SetupFlowIntegrationTests: XCTestCase {
         XCTAssertEqual(loaded?.authMethod, .https)
         XCTAssertEqual(loaded?.branch, "main")
         XCTAssertEqual(loaded?.graphName, "my-notes")
+        XCTAssertEqual(loaded?.repoMode, .logseqFolder)
+        XCTAssertEqual(loaded?.repoFolderDisplayName, "my-notes")
         XCTAssertTrue(configService.isSetupComplete)
     }
+}
+
+private final class IntegrationBookmarkServiceMock: SecurityScopedBookmarkServicing {
+    func createBookmarkData(for folderURL: URL) throws -> Data { Data("bookmark".utf8) }
+    func resolveBookmark(_ data: Data) throws -> URL { URL(fileURLWithPath: "/private/var/mobile/Logseq/my-notes") }
+    func withScopedAccess<T>(to folderURL: URL, _ operation: () throws -> T) throws -> T { try operation() }
+    func validateWritableDirectory(_ folderURL: URL) throws {}
+}
+
+private final class IntegrationFolderValidatorMock: LogseqFolderValidating {
+    func validate(_ folderURL: URL) throws {}
 }

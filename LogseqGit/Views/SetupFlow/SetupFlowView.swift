@@ -19,6 +19,9 @@ struct SetupFlowView: View {
         case .auth:
             AuthConfigView(viewModel: viewModel)
 
+        case .folder:
+            FolderSelectionView(viewModel: viewModel)
+
         case .clone:
             CloneProgressView(viewModel: viewModel)
 

@@ -88,29 +88,37 @@ struct CloneProgressView: View {
             // Save configuration BEFORE clone so credentials can be resolved.
             try await viewModel.saveConfig()
 
-            statusText = "Cloning repository..."
+            if viewModel.selectedRepoMode == .logseqFolder {
+                let domain = NSFileProviderDomain(
+                    identifier: NSFileProviderDomainIdentifier(rawValue: Constants.fileProviderDomainID),
+                    displayName: Constants.fileProviderDomainDisplayName
+                )
+                try? await NSFileProviderManager.remove(domain)
+            }
 
+            statusText = "Cloning repository..."
             try await viewModel.gitService.clone(
                 remoteURL: viewModel.remoteURL,
                 branch: viewModel.branch
             )
 
-            statusText = "Indexing files..."
+            if RepoRootResolver.shared.shouldUseLegacyFileProviderStorage() {
+                statusText = "Indexing files..."
 
-            // Populate the File Provider metadata database with cloned files.
-            MetadataDatabase.shared.syncWithDisk(
-                repoURL: Constants.repoPath,
-                excludedPaths: RepoManager.exclusionPatterns
-            )
+                let repoURL = try RepoRootResolver.shared.resolveRepoRootURL()
+                MetadataDatabase.shared.syncWithDisk(
+                    repoURL: repoURL,
+                    excludedPaths: RepoManager.exclusionPatterns
+                )
 
-            // Signal the File Provider so it picks up the new items.
-            let domain = NSFileProviderDomain(
-                identifier: NSFileProviderDomainIdentifier(rawValue: Constants.fileProviderDomainID),
-                displayName: "Logseq"
-            )
-            if let manager = NSFileProviderManager(for: domain) {
-                try? await manager.signalEnumerator(for: .workingSet)
-                try? await manager.signalEnumerator(for: .rootContainer)
+                let domain = NSFileProviderDomain(
+                    identifier: NSFileProviderDomainIdentifier(rawValue: Constants.fileProviderDomainID),
+                    displayName: Constants.fileProviderDomainDisplayName
+                )
+                if let manager = NSFileProviderManager(for: domain) {
+                    try? await manager.signalEnumerator(for: .workingSet)
+                    try? await manager.signalEnumerator(for: .rootContainer)
+                }
             }
 
             statusText = "Done!"

@@ -47,7 +47,7 @@ struct AuthConfigView: View {
         do {
             let token = patText.trimmingCharacters(in: .whitespacesAndNewlines)
             try viewModel.keychainService.storePAT(token)
-            viewModel.advanceToClone()
+            viewModel.advanceToFolder()
         } catch {
             errorText = error.localizedDescription
             showError = true

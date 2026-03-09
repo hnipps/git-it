@@ -6,6 +6,8 @@ final class SetupFlowViewModelTests: XCTestCase {
     private var tempDir: URL!
     private var configService: ConfigService!
     private var vm: SetupFlowViewModel!
+    private var bookmarkService: SetupBookmarkServiceMock!
+    private var folderValidator: SetupFolderValidatorMock!
 
     override func setUp() {
         super.setUp()
@@ -13,7 +15,13 @@ final class SetupFlowViewModelTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         configService = ConfigService(fileURL: tempDir.appendingPathComponent("config.json"))
-        vm = SetupFlowViewModel(configService: configService)
+        bookmarkService = SetupBookmarkServiceMock()
+        folderValidator = SetupFolderValidatorMock()
+        vm = SetupFlowViewModel(
+            configService: configService,
+            bookmarkService: bookmarkService,
+            folderValidator: folderValidator
+        )
     }
 
     override func tearDown() {
@@ -62,6 +70,9 @@ final class SetupFlowViewModelTests: XCTestCase {
         XCTAssertEqual(vm.currentStep, .remote)
         vm.advanceToAuth()
         XCTAssertEqual(vm.currentStep, .auth)
+        vm.advanceToFolder()
+        XCTAssertEqual(vm.currentStep, .folder)
+        vm.selectGraphFolder(URL(fileURLWithPath: "/private/var/mobile/Logseq/my-graph"))
         vm.advanceToClone()
         XCTAssertEqual(vm.currentStep, .clone)
         vm.advanceToInstructions()
@@ -69,7 +80,75 @@ final class SetupFlowViewModelTests: XCTestCase {
     }
 
     func testInitialStepIsRemote() {
-        let freshVM = SetupFlowViewModel(configService: configService)
+        let freshVM = SetupFlowViewModel(
+            configService: configService,
+            bookmarkService: bookmarkService,
+            folderValidator: folderValidator
+        )
         XCTAssertEqual(freshVM.currentStep, .remote)
+    }
+
+    func testAdvanceToCloneRequiresFolder() {
+        vm.advanceToClone()
+        XCTAssertEqual(vm.currentStep, .remote)
+        XCTAssertNotNil(vm.errorMessage)
+    }
+
+    func testSelectGraphFolderSetsDisplayName() {
+        let folder = URL(fileURLWithPath: "/private/var/mobile/Logseq/my-graph")
+        vm.selectGraphFolder(folder)
+
+        XCTAssertEqual(vm.selectedGraphFolderURL, folder)
+        XCTAssertEqual(vm.selectedGraphFolderDisplayName, "my-graph")
+        XCTAssertNil(vm.errorMessage)
+    }
+
+    func testSelectGraphFolderWithValidationErrorSetsError() {
+        folderValidator.shouldThrow = true
+        let folder = URL(fileURLWithPath: "/private/var/mobile/Documents/not-logseq")
+        vm.selectGraphFolder(folder)
+
+        XCTAssertNil(vm.selectedGraphFolderURL)
+        XCTAssertFalse(vm.errorMessage?.isEmpty ?? true)
+    }
+
+    func testSaveConfigPersistsLogseqFolderModeAndBookmark() async throws {
+        vm.remoteURL = "https://github.com/user/repo.git"
+        vm.branch = "main"
+        vm.graphName = "repo"
+        vm.selectGraphFolder(URL(fileURLWithPath: "/private/var/mobile/Logseq/repo"))
+
+        try await vm.saveConfig()
+
+        let config = try XCTUnwrap(configService.loadConfig())
+        XCTAssertEqual(config.repoMode, .logseqFolder)
+        XCTAssertEqual(config.repoFolderDisplayName, "repo")
+        XCTAssertEqual(config.repoFolderBookmarkData, Data("bookmark".utf8))
+    }
+}
+
+private final class SetupBookmarkServiceMock: SecurityScopedBookmarkServicing {
+    func createBookmarkData(for folderURL: URL) throws -> Data {
+        Data("bookmark".utf8)
+    }
+
+    func resolveBookmark(_ data: Data) throws -> URL {
+        URL(fileURLWithPath: "/private/var/mobile/Logseq/repo")
+    }
+
+    func withScopedAccess<T>(to folderURL: URL, _ operation: () throws -> T) throws -> T {
+        try operation()
+    }
+
+    func validateWritableDirectory(_ folderURL: URL) throws {}
+}
+
+private final class SetupFolderValidatorMock: LogseqFolderValidating {
+    var shouldThrow = false
+
+    func validate(_ folderURL: URL) throws {
+        if shouldThrow {
+            throw LogseqFolderValidationError.outsideLogseqDirectory
+        }
     }
 }

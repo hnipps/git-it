@@ -122,8 +122,13 @@ final class SettingsViewModel: ObservableObject {
                 return
             }
 
+            if config.repoMode == .logseqFolder {
+                errorMessage = "Re-clone in Logseq folder mode requires an empty folder. Re-run setup and choose a new empty folder."
+                return
+            }
+
             let gitService = GitService(keychainService: keychainService, configService: configService)
-            try await gitService.clone(remoteURL: config.remoteURL, branch: config.branch)
+            try await gitService.clone(remoteURL: config.remoteURL, branch: config.branch, allowOverwrite: true)
             logger.log(SyncLogEntry(action: "commit", message: "Repository reset and re-cloned"))
         } catch {
             errorMessage = "Reset failed: \(error.localizedDescription)"

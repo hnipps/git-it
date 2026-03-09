@@ -41,7 +41,7 @@ struct InstructionsView: View {
             instructionRow(
                 step: 3,
                 icon: "folder",
-                text: "Browse to \"\(viewModel.graphName)\" in the file picker"
+                text: "Pick the folder in Files > Logseq: \"\(viewModel.selectedGraphFolderDisplayName.isEmpty ? viewModel.graphName : viewModel.selectedGraphFolderDisplayName)\""
             )
             instructionRow(
                 step: 4,
@@ -51,7 +51,7 @@ struct InstructionsView: View {
         } header: {
             Text("Configure Logseq")
         } footer: {
-            Text("Point Logseq at the cloned repository so it can read and write your graph files.")
+            Text("In Logseq, do not pick the LogseqGit (app) location. Logseq only opens folders in iCloud Drive or On My iPhone/iPad.")
         }
     }
 

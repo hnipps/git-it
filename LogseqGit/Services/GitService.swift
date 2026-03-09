@@ -107,6 +107,8 @@ final class GitService: ObservableObject {
 
     private let keychainService: KeychainService
     private let configService: ConfigService
+    private let repoRootResolver: RepoRootResolving
+    private let bookmarkService: SecurityScopedBookmarkServicing
 
     /// Serial queue used to serialise synchronous libgit2 calls.
     private let gitQueue = DispatchQueue(label: "com.logseqgit.git", qos: .userInitiated)
@@ -114,12 +116,24 @@ final class GitService: ObservableObject {
     // MARK: - Init
 
     convenience init() {
-        self.init(keychainService: .shared, configService: .shared)
+        self.init(
+            keychainService: .shared,
+            configService: .shared,
+            repoRootResolver: RepoRootResolver.shared,
+            bookmarkService: SecurityScopedBookmarkService.shared
+        )
     }
 
-    init(keychainService: KeychainService, configService: ConfigService) {
+    init(
+        keychainService: KeychainService,
+        configService: ConfigService,
+        repoRootResolver: RepoRootResolving = RepoRootResolver.shared,
+        bookmarkService: SecurityScopedBookmarkServicing = SecurityScopedBookmarkService.shared
+    ) {
         self.keychainService = keychainService
         self.configService = configService
+        self.repoRootResolver = repoRootResolver
+        self.bookmarkService = bookmarkService
     }
 
     // MARK: - Clone
@@ -129,41 +143,45 @@ final class GitService: ObservableObject {
     /// - Parameters:
     ///   - remoteURL: The remote URL (SSH or HTTPS).
     ///   - branch: The branch to check out after cloning.
-    func clone(remoteURL: String, branch: String) async throws {
+    func clone(remoteURL: String, branch: String, allowOverwrite: Bool = false) async throws {
         await setStatus(.cloning)
 
         do {
             try await runOnGitQueue {
-                // Remove any pre-existing directory so we get a clean clone.
-                let repoPath = Constants.repoPath
-                if FileManager.default.fileExists(atPath: repoPath.path) {
-                    try FileManager.default.removeItem(at: repoPath)
-                }
-
-                print("[GitService] clone URL: \(remoteURL)")
-
-                let cloneResult = GitCredentialHelper.clone(
-                    from: remoteURL,
-                    to: repoPath,
-                    credentials: self.credentialContext()
-                )
-
-                switch cloneResult {
-                case .success(let repo):
-                    // Check out the requested branch if it differs from the default.
-                    let currentBranch = repo.localBranch(named: branch)
-                    switch currentBranch {
-                    case .success(let branchRef):
-                        let checkoutResult = repo.checkout(branchRef, strategy: .Force)
-                        if case .failure(let error) = checkoutResult {
-                            throw GitError.cloneFailed("Checkout of branch '\(branch)' failed: \(error.localizedDescription)")
+                try self.withRepoScopedAccess { repoPath in
+                    if FileManager.default.fileExists(atPath: repoPath.path) {
+                        if self.repoRootResolver.shouldUseLegacyFileProviderStorage() {
+                            try FileManager.default.removeItem(at: repoPath)
+                        } else if allowOverwrite {
+                            throw GitError.cloneFailed("Overwrite is only supported for legacy app storage. Choose an empty Logseq folder.")
+                        } else if self.directoryHasContents(repoPath) {
+                            throw GitError.cloneFailed("Selected folder is not empty. Choose an empty folder for cloning.")
                         }
-                    case .failure:
-                        // Branch may already be the default HEAD — nothing extra to do.
-                        break
                     }
-                case .failure(let error):
-                    throw self.mapError(error, as: GitError.cloneFailed)
+
+                    print("[GitService] clone URL: \(remoteURL)")
+
+                    let cloneResult = GitCredentialHelper.clone(
+                        from: remoteURL,
+                        to: repoPath,
+                        credentials: self.credentialContext()
+                    )
+
+                    switch cloneResult {
+                    case .success(let repo):
+                        let currentBranch = repo.localBranch(named: branch)
+                        switch currentBranch {
+                        case .success(let branchRef):
+                            let checkoutResult = repo.checkout(branchRef, strategy: .Force)
+                            if case .failure(let error) = checkoutResult {
+                                throw GitError.cloneFailed("Checkout of branch '\(branch)' failed: \(error.localizedDescription)")
+                            }
+                        case .failure:
+                            break
+                        }
+                    case .failure(let error):
+                        throw self.mapError(error, as: GitError.cloneFailed)
+                    }
                 }
             }
             await setStatus(.idle)
@@ -186,55 +204,58 @@ final class GitService: ObservableObject {
 
         do {
             let result: PullResult = try await runOnGitQueue {
-                let repo = try self.openRepo()
+                let repoURL = try self.repoRootResolver.resolveRepoRootURL()
+                return try self.withRepoScopedAccess(at: repoURL) {
+                    let repo = try self.openRepo(at: repoURL)
 
                 // 1. Fetch from origin.
-                let fetchResult = GitCredentialHelper.fetch(
-                    repo: repo,
-                    remoteName: "origin",
-                    credentials: self.credentialContext()
-                )
-                if case .failure(let error) = fetchResult {
-                    throw self.mapError(error, as: GitError.pullFailed)
-                }
+                    let fetchResult = GitCredentialHelper.fetch(
+                        repo: repo,
+                        remoteName: "origin",
+                        credentials: self.credentialContext()
+                    )
+                    if case .failure(let error) = fetchResult {
+                        throw self.mapError(error, as: GitError.pullFailed)
+                    }
 
                 // 2. Resolve the local and remote branch references.
-                guard let config = self.configService.loadConfig() else {
-                    throw GitError.pullFailed("No configuration available.")
-                }
+                    guard let config = self.configService.loadConfig() else {
+                        throw GitError.pullFailed("No configuration available.")
+                    }
 
-                let branchName = config.branch
-                guard case .success(let localBranch) = repo.localBranch(named: branchName) else {
-                    throw GitError.pullFailed("Local branch '\(branchName)' not found.")
-                }
-                guard case .success(let remoteBranch) = repo.remoteBranch(named: "origin/\(branchName)") else {
-                    throw GitError.pullFailed("Remote branch 'origin/\(branchName)' not found.")
-                }
+                    let branchName = config.branch
+                    guard case .success(let localBranch) = repo.localBranch(named: branchName) else {
+                        throw GitError.pullFailed("Local branch '\(branchName)' not found.")
+                    }
+                    guard case .success(let remoteBranch) = repo.remoteBranch(named: "origin/\(branchName)") else {
+                        throw GitError.pullFailed("Remote branch 'origin/\(branchName)' not found.")
+                    }
 
-                let localOID = repo.HEAD().flatMap { repo.commit($0.oid) }
-                let remoteOID = repo.commit(remoteBranch.oid)
+                    let localOID = repo.HEAD().flatMap { repo.commit($0.oid) }
+                    let remoteOID = repo.commit(remoteBranch.oid)
 
-                guard case .success(let localCommit) = localOID,
-                      case .success(let remoteCommit) = remoteOID else {
-                    throw GitError.pullFailed("Unable to resolve HEAD or remote commit.")
-                }
+                    guard case .success(let localCommit) = localOID,
+                          case .success(let remoteCommit) = remoteOID else {
+                        throw GitError.pullFailed("Unable to resolve HEAD or remote commit.")
+                    }
 
                 // Already up to date.
-                if localCommit.oid == remoteCommit.oid {
-                    return .upToDate
-                }
+                    if localCommit.oid == remoteCommit.oid {
+                        return .upToDate
+                    }
 
                 // 3. Attempt fast-forward: set HEAD to remote branch and checkout.
-                let setRef = repo.setHEAD(remoteBranch)
-                if case .failure(let error) = setRef {
-                    throw GitError.pullFailed("Cannot fast-forward — branches may have diverged: \(error.localizedDescription)")
+                    let setRef = repo.setHEAD(remoteBranch)
+                    if case .failure(let error) = setRef {
+                        throw GitError.pullFailed("Cannot fast-forward — branches may have diverged: \(error.localizedDescription)")
+                    }
+                    let checkoutResult = repo.checkout(remoteBranch, strategy: .Force)
+                    if case .failure(let error) = checkoutResult {
+                        throw GitError.pullFailed("Checkout failed: \(error.localizedDescription)")
+                    }
+                    let diffCount = try self.diffFileCount(repo: repo, from: localCommit.oid, to: remoteCommit.oid)
+                    return .pulled(fileCount: diffCount)
                 }
-                let checkoutResult = repo.checkout(remoteBranch, strategy: .Force)
-                if case .failure(let error) = checkoutResult {
-                    throw GitError.pullFailed("Checkout failed: \(error.localizedDescription)")
-                }
-                let diffCount = try self.diffFileCount(repo: repo, from: localCommit.oid, to: remoteCommit.oid)
-                return .pulled(fileCount: diffCount)
             }
 
             // Update config with pull timestamp.
@@ -267,31 +288,34 @@ final class GitService: ObservableObject {
 
         do {
             let committed: Bool = try await runOnGitQueue {
-                let repo = try self.openRepo()
+                let repoURL = try self.repoRootResolver.resolveRepoRootURL()
+                return try self.withRepoScopedAccess(at: repoURL) {
+                    let repo = try self.openRepo(at: repoURL)
 
                 // Check for changes first.
-                guard try self.workingTreeHasChanges(repo: repo) else {
-                    return false
-                }
+                    guard try self.workingTreeHasChanges(repo: repo) else {
+                        return false
+                    }
 
                 // Stage everything (git add -A).
-                let addResult = repo.add(path: ".")
-                if case .failure(let error) = addResult {
-                    throw GitError.commitFailed("Staging failed: \(error.localizedDescription)")
-                }
+                    let addResult = repo.add(path: ".")
+                    if case .failure(let error) = addResult {
+                        throw GitError.commitFailed("Staging failed: \(error.localizedDescription)")
+                    }
 
                 // Resolve commit message.
-                let finalMessage = message ?? self.generateCommitMessage()
+                    let finalMessage = message ?? self.generateCommitMessage()
 
                 // Build signature.
-                let signature = self.makeSignature()
+                    let signature = self.makeSignature()
 
-                let commitResult = repo.commit(message: finalMessage, signature: signature)
-                switch commitResult {
-                case .success:
-                    return true
-                case .failure(let error):
-                    throw GitError.commitFailed(error.localizedDescription)
+                    let commitResult = repo.commit(message: finalMessage, signature: signature)
+                    switch commitResult {
+                    case .success:
+                        return true
+                    case .failure(let error):
+                        throw GitError.commitFailed(error.localizedDescription)
+                    }
                 }
             }
 
@@ -311,25 +335,28 @@ final class GitService: ObservableObject {
 
         do {
             try await runOnGitQueue {
-                let repo = try self.openRepo()
+                let repoURL = try self.repoRootResolver.resolveRepoRootURL()
+                try self.withRepoScopedAccess(at: repoURL) {
+                    let repo = try self.openRepo(at: repoURL)
 
-                guard let config = self.configService.loadConfig() else {
-                    throw GitError.pushFailed("No configuration available.")
-                }
+                    guard let config = self.configService.loadConfig() else {
+                        throw GitError.pushFailed("No configuration available.")
+                    }
 
-                guard case .success(let localBranch) = repo.localBranch(named: config.branch) else {
-                    throw GitError.pushFailed("Local branch '\(config.branch)' not found.")
-                }
+                    guard case .success(let localBranch) = repo.localBranch(named: config.branch) else {
+                        throw GitError.pushFailed("Local branch '\(config.branch)' not found.")
+                    }
 
-                let pushResult = GitCredentialHelper.push(
-                    repo: repo,
-                    remoteName: "origin",
-                    refspec: localBranch.longName,
-                    credentials: self.credentialContext()
-                )
+                    let pushResult = GitCredentialHelper.push(
+                        repo: repo,
+                        remoteName: "origin",
+                        refspec: localBranch.longName,
+                        credentials: self.credentialContext()
+                    )
 
-                if case .failure(let error) = pushResult {
-                    throw self.mapError(error, as: GitError.pushFailed)
+                    if case .failure(let error) = pushResult {
+                        throw self.mapError(error, as: GitError.pushFailed)
+                    }
                 }
             }
 
@@ -380,12 +407,14 @@ final class GitService: ObservableObject {
     /// Returns an array of files that differ from HEAD.
     func getStatus() async throws -> [StatusEntry] {
         try await runOnGitQueue {
-            let repo = try self.openRepo()
+            let repoURL = try self.repoRootResolver.resolveRepoRootURL()
+            return try self.withRepoScopedAccess(at: repoURL) {
+                let repo = try self.openRepo(at: repoURL)
 
-            let statusResult = repo.status()
-            switch statusResult {
-            case .success(let entries):
-                return entries.compactMap { entry -> StatusEntry? in
+                let statusResult = repo.status()
+                switch statusResult {
+                case .success(let entries):
+                    return entries.compactMap { entry -> StatusEntry? in
                     let fileStatus: FileStatus
                     if entry.status.contains(.workTreeNew) {
                         fileStatus = .untracked
@@ -406,9 +435,10 @@ final class GitService: ObservableObject {
                     guard let path = filePath else { return nil }
 
                     return StatusEntry(filePath: path, status: fileStatus)
+                    }
+                case .failure(let error):
+                    throw GitError.commitFailed("Could not read status: \(error.localizedDescription)")
                 }
-            case .failure(let error):
-                throw GitError.commitFailed("Could not read status: \(error.localizedDescription)")
             }
         }
     }
@@ -416,8 +446,11 @@ final class GitService: ObservableObject {
     /// Quick check for any uncommitted changes in the working tree.
     func hasUncommittedChanges() async throws -> Bool {
         try await runOnGitQueue {
-            let repo = try self.openRepo()
-            return try self.workingTreeHasChanges(repo: repo)
+            let repoURL = try self.repoRootResolver.resolveRepoRootURL()
+            return try self.withRepoScopedAccess(at: repoURL) {
+                let repo = try self.openRepo(at: repoURL)
+                return try self.workingTreeHasChanges(repo: repo)
+            }
         }
     }
 
@@ -453,19 +486,51 @@ final class GitService: ObservableObject {
 
     // MARK: - Helpers (Private)
 
-    /// Opens the repository at the shared container path, throwing if it doesn't exist.
-    private func openRepo() throws -> Repository {
-        guard RepoManager.shared.isCloned else {
+    private func openRepo(at repoURL: URL) throws -> Repository {
+        let gitDir = repoURL.appendingPathComponent(".git")
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: gitDir.path, isDirectory: &isDirectory)
+        guard exists && isDirectory.boolValue else {
             throw GitError.notCloned
         }
 
-        let result = Repository.at(Constants.repoPath)
+        let result = Repository.at(repoURL)
         switch result {
         case .success(let repo):
             return repo
-        case .failure(let error):
+        case .failure:
             throw GitError.notCloned
         }
+    }
+
+    private func withRepoScopedAccess<T>(at repoURL: URL, _ operation: () throws -> T) throws -> T {
+        if repoRootResolver.shouldUseLegacyFileProviderStorage() {
+            return try operation()
+        }
+        return try bookmarkService.withScopedAccess(to: repoURL, operation)
+    }
+
+    private func withRepoScopedAccess<T>(_ operation: (URL) throws -> T) throws -> T {
+        let repoURL = try repoRootResolver.resolveRepoRootURL()
+        return try withRepoScopedAccess(at: repoURL) {
+            try operation(repoURL)
+        }
+    }
+
+    private func directoryHasContents(_ directoryURL: URL) -> Bool {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: [],
+            errorHandler: nil
+        ) else {
+            return false
+        }
+
+        for _ in enumerator {
+            return true
+        }
+        return false
     }
 
     /// Checks whether the working tree has any uncommitted changes.
@@ -552,9 +617,13 @@ final class GitService: ObservableObject {
 
     /// Signals the File Provider extension that the repository contents have changed.
     private func signalFileProvider() async {
+        guard repoRootResolver.shouldUseLegacyFileProviderStorage() else {
+            return
+        }
+
         let domain = NSFileProviderDomain(
             identifier: NSFileProviderDomainIdentifier(rawValue: Constants.fileProviderDomainID),
-            displayName: "Logseq"
+            displayName: Constants.fileProviderDomainDisplayName
         )
 
         do {

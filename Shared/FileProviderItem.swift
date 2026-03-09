@@ -65,7 +65,9 @@ class FileProviderItem: NSObject, NSFileProviderItem {
         if isDirectory {
             self.capabilities = [
                 .allowsReading,
+                .allowsWriting,
                 .allowsContentEnumerating,
+                .allowsAddingSubItems,
                 .allowsDeleting,
                 .allowsRenaming,
                 .allowsReparenting
@@ -90,4 +92,12 @@ class FileProviderItem: NSObject, NSFileProviderItem {
 
         super.init()
     }
+
+    // MARK: - Transfer state
+
+    var isUploaded: Bool { true }
+    var isUploading: Bool { false }
+    var isDownloaded: Bool { true }
+    var isDownloading: Bool { false }
+    var isMostRecentVersionDownloaded: Bool { true }
 }

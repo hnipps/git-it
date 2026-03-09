@@ -34,7 +34,7 @@ final class AppState: ObservableObject {
         if CommandLine.arguments.contains("--uitesting-reset") {
             let domain = NSFileProviderDomain(
                 identifier: NSFileProviderDomainIdentifier(rawValue: Constants.fileProviderDomainID),
-                displayName: "Logseq"
+                displayName: Constants.fileProviderDomainDisplayName
             )
             try? await NSFileProviderManager.remove(domain)
 
@@ -60,8 +60,13 @@ final class AppState: ObservableObject {
     private func registerFileProviderDomain() async {
         let domain = NSFileProviderDomain(
             identifier: NSFileProviderDomainIdentifier(rawValue: Constants.fileProviderDomainID),
-            displayName: "Logseq"
+            displayName: Constants.fileProviderDomainDisplayName
         )
+
+        if let config = ConfigService.shared.loadConfig(), config.repoMode == .logseqFolder {
+            try? await NSFileProviderManager.remove(domain)
+            return
+        }
 
         do {
             try await NSFileProviderManager.add(domain)

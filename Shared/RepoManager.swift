@@ -3,6 +3,8 @@ import Foundation
 final class RepoManager {
     static let shared = RepoManager()
 
+    private let repoRootResolver: RepoRootResolving
+
     // MARK: - Exclusion Patterns
 
     /// File and directory patterns that should be excluded from sync operations.
@@ -19,22 +21,24 @@ final class RepoManager {
     // MARK: - Properties
 
     var repoURL: URL {
-        Constants.repoPath
+        (try? repoRootResolver.resolveRepoRootURL()) ?? Constants.repoPath
     }
 
     var repoPath: String {
-        Constants.repoPath.path
+        repoURL.path
     }
 
     // MARK: - Init
 
-    private init() {}
+    init(repoRootResolver: RepoRootResolving = RepoRootResolver.shared) {
+        self.repoRootResolver = repoRootResolver
+    }
 
     // MARK: - Repo State
 
     /// Returns `true` if the repository directory exists and contains a `.git` subdirectory.
     var isCloned: Bool {
-        let gitDir = Constants.repoPath.appendingPathComponent(".git")
+        let gitDir = repoURL.appendingPathComponent(".git")
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: gitDir.path, isDirectory: &isDirectory)
         return exists && isDirectory.boolValue

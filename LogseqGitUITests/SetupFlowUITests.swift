@@ -65,6 +65,14 @@ final class SetupFlowUITests: XCTestCase {
         XCTAssertTrue(authNextButton.isEnabled)
         authNextButton.tap()
 
+        let useLegacyFolderButton = app.buttons[AccessibilityID.folderUseLegacyButton]
+        XCTAssertTrue(useLegacyFolderButton.waitForExistence(timeout: 5))
+        useLegacyFolderButton.tap()
+
+        let folderNextButton = app.buttons[AccessibilityID.folderContinueButton]
+        XCTAssertTrue(folderNextButton.isEnabled)
+        folderNextButton.tap()
+
         // Step 3: Wait for clone to complete — the Instructions "Done" button appears
         let doneButton = app.buttons[AccessibilityID.instructionsDoneButton]
         XCTAssertTrue(doneButton.waitForExistence(timeout: 120))

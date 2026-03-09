@@ -1,11 +1,11 @@
 # Git It
 
-Git-based sync for [Logseq](https://logseq.com) on iOS. Clone your graph from any git remote, then let Logseq read and write files through a File Provider extension while Git It handles pull, commit, and push in the background.
+Git-based sync for [Logseq](https://logseq.com) on iOS. Clone your graph from any git remote into a Logseq-accessible Files folder, then let Git It handle pull, commit, and push in the background.
 
 ## Features
 
 - **One-tap sync** -- pull, commit, and push from a single button
-- **File Provider extension** -- Logseq iOS sees your graph as a native file source, no manual import/export
+- **Logseq folder mode** -- pick a folder inside Files > Logseq so Logseq and Git It read/write the same graph
 - **Background sync** -- periodic background refresh keeps your graph up to date
 - **Shortcuts / App Intents** -- automate pull, commit & push, and status checks from the Shortcuts app or Siri
 - **SSH and HTTPS auth** -- works with GitHub, Gitea, bare SSH repos, or any standard git remote
@@ -81,8 +81,9 @@ When you first launch Git It, a setup wizard walks you through:
 
 1. **Remote URL** -- enter your git repo URL (SSH or HTTPS).
 2. **Authentication** -- paste an SSH private key or a personal access token.
-3. **Clone** -- the app clones the repo into a shared container.
-4. **Instructions** -- brief guide on pointing Logseq iOS at the File Provider.
+3. **Graph Folder** -- choose a folder inside **Files > Logseq**.
+4. **Clone** -- the app clones the repo into that selected folder.
+5. **Instructions** -- brief guide on opening that folder in Logseq iOS.
 
 ### Day-to-day workflow
 
