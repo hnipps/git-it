@@ -1,15 +1,16 @@
 # Git It
 
-Git-based sync for [Logseq](https://logseq.com) on iOS. Clone your graph from any git remote into a Logseq-accessible Files folder, then let Git It handle pull, commit, and push in the background.
+Git-based sync for [Logseq](https://logseq.com) on iOS. Clone your graph from any git remote into a Files folder that Logseq can open, then let Git It handle pull, commit, and push in the background.
 
 ## Features
 
 - **One-tap sync** -- pull, commit, and push from a single button
-- **Logseq folder mode** -- pick a folder inside Files > Logseq so Logseq and Git It read/write the same graph
+- **Logseq folder mode** -- pick a folder in Files and clone directly there so Logseq and Git It read/write the same graph
 - **Background sync** -- periodic background refresh keeps your graph up to date
 - **Shortcuts / App Intents** -- automate pull, commit & push, and status checks from the Shortcuts app or Siri
-- **SSH and HTTPS auth** -- works with GitHub, Gitea, bare SSH repos, or any standard git remote
+- **HTTPS token auth** -- works with GitHub and any git host that supports HTTPS + personal access tokens
 - **Conflict-safe** -- on divergence, local changes are saved to a side branch so nothing is lost
+- **Legacy fallback mode** -- optional app-local storage for troubleshooting (not openable from Logseq)
 
 ## Requirements
 
@@ -19,7 +20,7 @@ Git-based sync for [Logseq](https://logseq.com) on iOS. Clone your graph from an
 | Xcode | 15.0+ |
 | [XcodeGen](https://github.com/yonaskolb/XcodeGen) | 2.38+ |
 | iOS device | 16.0+ |
-| Apple Developer account | Free or paid (paid required for File Provider) |
+| Apple Developer account | Free or paid (paid may be required for File Provider entitlements on device) |
 
 ## Getting Started
 
@@ -79,11 +80,23 @@ open LogseqGit.xcodeproj
 
 When you first launch Git It, a setup wizard walks you through:
 
-1. **Remote URL** -- enter your git repo URL (SSH or HTTPS).
-2. **Authentication** -- paste an SSH private key or a personal access token.
-3. **Graph Folder** -- choose a folder inside **Files > Logseq**.
+1. **Remote URL** -- enter your git repo URL (HTTPS).
+2. **Authentication** -- paste a personal access token (PAT).
+3. **Graph Folder** -- tap **Choose Folder** and select an **empty** folder in Files (recommended location: **Files > Logseq**).
 4. **Clone** -- the app clones the repo into that selected folder.
 5. **Instructions** -- brief guide on opening that folder in Logseq iOS.
+
+Notes:
+- The selected folder must be empty before cloning.
+- Legacy app storage is available from the setup screen, but Logseq cannot open that location.
+
+### iOS folder requirements
+
+On iOS, Logseq can only open folders where it has persistent sandbox access (typically `iCloud Drive/Logseq` or `On My iPhone/Logseq`).
+
+- Recommended: keep your graph under the `Logseq` folder visible in Files.
+- Avoid third-party provider folders (Dropbox/OneDrive/Google Drive) for Logseq graph roots on iOS.
+- If Logseq shows "Please choose a valid directory", move the graph folder into a supported Logseq location and reselect it.
 
 ### Day-to-day workflow
 
@@ -114,12 +127,14 @@ Combine these with Shortcuts automations (e.g. "When I open Logseq, run Pull") f
 │   ├── Views/                   # SwiftUI views (MainView, SettingsView, SetupFlow)
 │   ├── Services/                # GitService, BackgroundSyncService, KeychainService, etc.
 │   └── Intents/                 # App Intents for Shortcuts integration
-├── FileProviderExtension/       # File Provider extension (exposes repo to Logseq)
+├── FileProviderExtension/       # File Provider extension (legacy provider mode)
 ├── Shared/                      # Code shared between the app and extension
 │   ├── Constants.swift          # App Group IDs, paths, notification names
 │   ├── AppConfig.swift          # Persisted configuration model
 │   ├── ConfigService.swift      # Read/write config from shared container
-│   ├── RepoManager.swift        # Repository path and clone-state helpers
+│   ├── RepoRootResolver.swift   # Resolves active repo location (legacy vs folder)
+│   ├── SecurityScopedBookmarkService.swift # Bookmark and folder-access helpers
+│   ├── RepoManager.swift        # Repository enumeration and helper logic
 │   └── MetadataDatabase.swift   # SQLite metadata for the File Provider
 └── LogseqGitTests/              # Unit and integration tests
 ```
@@ -133,6 +148,8 @@ xcodebuild test \
   -scheme LogseqGit \
   -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
+
+If your simulator/device list differs, run `xcodebuild -showdestinations -project LogseqGit.xcodeproj -scheme LogseqGit` and replace the destination.
 
 ## License
 
